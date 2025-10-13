@@ -18,6 +18,7 @@
     "express": "^5.1.0",
     "nodemon": "^3.1.10",
     "openai": "^6.1.0",
-    "pdfjs-dist": "^5.4.296"
+    "pdfjs-dist": "^5.4.296",
+    "twilio": "^5.10.2"
   }
 }

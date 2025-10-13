@@ -5,11 +5,18 @@ import dotenv from "dotenv";
 import OpenAI from "openai";
 import fs from "fs";
 import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
+import { createRequire } from "module";
+
+const require = createRequire(import.meta.url);
+const twilio = require('twilio');
 
 dotenv.config();
 
 const app = express();
 app.use(cors());
+
+// Middleware para parsear datos de formulario (necesario para Twilio)
+app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
 
 // Configura el cliente de OpenAI
@@ -104,6 +111,125 @@ Responde de forma clara, detallada y profesional. Si la pregunta no está relaci
   } catch (error) {
     console.error("❌ Error en el chat:", error);
     res.status(500).json({ error: "Ocurrió un error al generar la respuesta" });
+  }
+});
+
+// Webhook para Twilio WhatsApp
+app.post("/api/twilio-webhook", async (req, res) => {
+  try {
+    const { Body, From, To } = req.body;
+    
+    console.log(`📱 Mensaje recibido de ${From}: ${Body}`);
+    
+    // Crear el prompt dinámico con el contenido del PDF
+    const dynamicPrompt = `
+Eres un asistente especializado en análisis de planos de casas llamado CasaBot 🏠.
+Tienes acceso a la información de un plano de casa específico y puedes responder preguntas sobre:
+- Distribución de espacios y habitaciones
+- Dimensiones y medidas
+- Características arquitectónicas
+- Ubicación de elementos específicos
+- Cualquier detalle visible en el plano
+
+Información del plano disponible:
+${pdfContent}
+
+Responde de forma clara, detallada y profesional. Si la pregunta no está relacionada con el plano, indícalo cortésmente y ofrece ayuda con temas relacionados a arquitectura o planos de casas.
+
+Mantén las respuestas concisas para WhatsApp (máximo 1600 caracteres por mensaje).
+`;
+
+    // Obtener respuesta de OpenAI
+    const response = await client.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: dynamicPrompt },
+        { role: "user", content: Body },
+      ],
+    });
+
+    const reply = response.choices[0].message.content;
+    
+    // Crear respuesta TwiML
+    const twiml = new twilio.twiml.MessagingResponse();
+    twiml.message(reply);
+    
+    // Configurar headers para TwiML
+    res.type('text/xml');
+    res.send(twiml.toString());
+    
+    console.log(`🤖 Respuesta enviada: ${reply.substring(0, 100)}...`);
+    
+  } catch (error) {
+    console.error("❌ Error en webhook de Twilio:", error);
+    
+    // Enviar mensaje de error en TwiML
+    const twiml = new twilio.twiml.MessagingResponse();
+    twiml.message("Lo siento, ocurrió un error al procesar tu consulta. Por favor, intenta de nuevo.");
+    
+    res.type('text/xml');
+    res.send(twiml.toString());
+  }
+});
+
+// Endpoint para testing del webhook de Twilio (acepta JSON)
+app.post("/api/twilio-test", async (req, res) => {
+  try {
+    const { Body, From, To } = req.body;
+    
+    console.log(`🧪 Test - Mensaje recibido de ${From}: ${Body}`);
+    
+    // Crear el prompt dinámico con el contenido del PDF
+    const dynamicPrompt = `
+Eres un asistente especializado en análisis de planos de casas llamado CasaBot 🏠.
+Tienes acceso a la información de un plano de casa específico y puedes responder preguntas sobre:
+- Distribución de espacios y habitaciones
+- Dimensiones y medidas
+- Características arquitectónicas
+- Ubicación de elementos específicos
+- Cualquier detalle visible en el plano
+
+Información del plano disponible:
+${pdfContent}
+
+Responde de forma clara, detallada y profesional. Si la pregunta no está relacionada con el plano, indícalo cortésmente y ofrece ayuda con temas relacionados a arquitectura o planos de casas.
+
+Mantén las respuestas concisas para WhatsApp (máximo 1600 caracteres por mensaje).
+`;
+
+    // Obtener respuesta de OpenAI
+    const response = await client.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: dynamicPrompt },
+        { role: "user", content: Body },
+      ],
+    });
+
+    const reply = response.choices[0].message.content;
+    
+    // Crear respuesta TwiML para mostrar cómo se vería
+    const twiml = new twilio.twiml.MessagingResponse();
+    twiml.message(reply);
+    
+    res.json({
+      success: true,
+      message: "Respuesta generada exitosamente",
+      twiml: twiml.toString(),
+      reply: reply,
+      from: From,
+      to: To
+    });
+    
+    console.log(`🤖 Test - Respuesta generada: ${reply.substring(0, 100)}...`);
+    
+  } catch (error) {
+    console.error("❌ Error en test de Twilio:", error);
+    res.status(500).json({ 
+      success: false,
+      error: "Ocurrió un error al procesar la consulta",
+      details: error.message 
+    });
   }
 });
 
